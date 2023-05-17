@@ -1,5 +1,8 @@
 package com.example.service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -18,6 +21,7 @@ import org.springframework.util.StringUtils;
 
 import com.example.model.Dept;
 import com.example.model.Emp;
+import com.example.model.QueryEmp;
 import com.example.repository.DeptRepository;
 import com.example.repository.EmpRepository;
 
@@ -39,20 +43,46 @@ public class CompanyService {
 		return deptRepository.findById(deptno);
 	}
 
-	public List<Emp> empContains(Emp emp) {
+	public List<Emp> empContains(QueryEmp queryEmp) {
 		return empRepository.findAll((root, query, builder) -> {
+			BigDecimal salLowLimit = queryEmp.getSalLowLimit();
+			BigDecimal salUpLimit = queryEmp.getSalUpLimit();
+			String empStartDate = queryEmp.getStartDate();
+			String empEndDate = queryEmp.getEndDate();
 			Predicate predicate = builder.conjunction();
-			if (StringUtils.hasText(emp.getJob())) {
-				predicate = builder.and(predicate, builder.equal(root.get("job"), emp.getJob()));
+			if (StringUtils.hasText(queryEmp.getJob())) {
+				predicate = builder.and(predicate, builder.equal(root.get("job"), queryEmp.getJob()));
 			}
-			if (!Objects.isNull(emp.getDeptno())) {
-				predicate = builder.and(predicate, builder.equal(root.get("deptno"), emp.getDeptno()));
+			if (StringUtils.hasText(queryEmp.getDname())) {
+				Optional<Dept> optionalDept = deptRepository.findByDname(queryEmp.getDname());
+				if (optionalDept.isPresent()) {
+					Dept dept = optionalDept.get();
+					predicate = builder.and(predicate, builder.equal(root.get("deptno"), dept.getDeptno()));
+				}
 			}
-			if (!Objects.isNull(emp.getEmpno())) {
-				predicate = builder.and(predicate, builder.equal(root.get("empno"), emp.getEmpno()));
+			if (StringUtils.hasText(queryEmp.getEname())) {
+//				String ename = queryEmp.getEname().replaceAll("%", ".");
+//				queryEmp.setEname(ename.replaceAll("_", "."));
+				predicate = builder.and(predicate, builder.like(root.get("ename"), "%" + queryEmp.getEname() + "%"));
 			}
-			if(StringUtils.hasText(emp.getEname())) {
-				predicate = builder.and(predicate, builder.like(root.get("ename"), "%" + emp.getEname() + "%"));
+			if (StringUtils.hasText(empStartDate) || StringUtils.hasText(empEndDate)) {
+				LocalDate startDate = formatDate(empStartDate);
+				LocalDate endDate = formatDate(empEndDate);
+				if (startDate != null && endDate != null) {
+					predicate = builder.and(predicate,
+							builder.between(root.get("hiredate"), startDate, endDate.plusDays(1)));
+				} else if (startDate != null) {
+					predicate = builder.and(predicate, builder.greaterThanOrEqualTo(root.get("hiredate"), startDate));
+				} else if (endDate != null) {
+					predicate = builder.and(predicate, builder.lessThan(root.get("hiredate"), endDate.plusDays(1)));
+				}
+			}
+			if (salUpLimit != null && salLowLimit != null) {
+				predicate = builder.and(predicate, builder.between(root.get("sal"), salLowLimit, salUpLimit));
+			} else if (queryEmp.getSalLowLimit() != null) {
+				predicate = builder.and(predicate, builder.greaterThanOrEqualTo(root.get("sal"), salLowLimit));
+			} else if (queryEmp.getSalUpLimit() != null) {
+				predicate = builder.and(predicate, builder.lessThanOrEqualTo(root.get("sal"), salUpLimit));
 			}
 			return predicate;
 		});
@@ -73,10 +103,7 @@ public class CompanyService {
 		if (!Objects.isNull(emp.getDeptno())) {
 			predicate = builder.and(predicate, builder.equal(root.get("deptno"), emp.getDeptno()));
 		}
-		if (!Objects.isNull(emp.getEmpno())) {
-			predicate = builder.and(predicate, builder.equal(root.get("empno"), emp.getEmpno()));
-		}
-		if(StringUtils.hasText(emp.getEname())) {
+		if (StringUtils.hasText(emp.getEname())) {
 			predicate = builder.and(predicate, builder.like(root.get("ename"), "%" + emp.getEname() + "%"));
 		}
 		query.select(root).where(predicate);
@@ -85,4 +112,13 @@ public class CompanyService {
 		return typedQuery.getResultList();
 	}
 
+	public LocalDate formatDate(String queryDate) {
+		try {
+			DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+			LocalDate responseDate = LocalDate.parse(queryDate, dtf);
+			return responseDate;
+		} catch (Exception e) {
+			return null;
+		}
+	}
 }
